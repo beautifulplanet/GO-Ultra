@@ -15,5 +15,5 @@ getrandom = { version = "0.2", features = ["js"] }
 wasm-bindgen-test = "0.3"
 
 [profile.release]
-opt-level = "z"
+opt-level = 3
 lto = true
