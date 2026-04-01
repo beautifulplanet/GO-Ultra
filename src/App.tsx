@@ -40,8 +40,9 @@ function App() {
   const sceneContainerRef = useRef<HTMLDivElement>(null)
   const sceneRef = useRef<SceneManager | null>(null)
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null)
+  const [sceneReady, setSceneReady] = useState(false)
 
-  const { ready, state, play, pass, aiMoveSync, newGame } = useGoEngine(boardSize, players)
+  const { ready, state, play, pass, aiMoveSync, newGame, setSuicide } = useGoEngine(boardSize, players)
 
   // Refs to avoid stale closures in 3D event listeners
   const stateRef = useRef(state)
@@ -59,6 +60,9 @@ function App() {
   }, [difficulty, boardSize])
 
   const getRandomChance = useCallback(() => DIFF_RANDOM_CHANCE[Math.min(difficulty - 1, 9)], [difficulty])
+
+  // ── Sync suicide setting to WASM engine ──
+  useEffect(() => { setSuicide(allowSuicide) }, [allowSuicide, setSuicide])
 
   // ── Start game from lobby ──
   const handleStart = (config: {
@@ -91,17 +95,19 @@ function App() {
     }
 
     // Wait for layout
+    setSceneReady(false)
     const raf = requestAnimationFrame(() => {
       const scene = new SceneManager(container, boardSize, 'high')
       sceneRef.current = scene
       scene.start()
+      setSceneReady(true)
     })
-    return () => { cancelAnimationFrame(raf) }
+    return () => { cancelAnimationFrame(raf); setSceneReady(false) }
   }, [phase, renderMode, boardSize])
 
-  // ── 3D pointer events ──
+  // ── 3D pointer events — only bind after scene is confirmed ready ──
   useEffect(() => {
-    if (phase !== 'playing' || renderMode !== '3d') return
+    if (phase !== 'playing' || renderMode !== '3d' || !sceneReady) return
     const scene = sceneRef.current
     if (!scene) return
     const canvas = scene.getCanvas()
@@ -128,7 +134,7 @@ function App() {
       canvas.removeEventListener('pointerdown', onPointerDown)
       canvas.removeEventListener('pointermove', onPointerMove)
     }
-  }, [phase, renderMode, play])
+  }, [phase, renderMode, play, sceneReady])
 
   // ── Sync stones to 3D scene ──
   useEffect(() => {
@@ -217,6 +223,7 @@ function App() {
     setThinking(false)
     aiLockRef.current = false
     if (sceneRef.current) { sceneRef.current.dispose(); sceneRef.current = null }
+    setSceneReady(false)
     newGame(boardSize, players)
     setPhase('playing')
   }

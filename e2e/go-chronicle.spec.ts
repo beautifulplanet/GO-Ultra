@@ -207,7 +207,98 @@ test.describe('Go Chronicle E2E', () => {
     expect(errors).toHaveLength(0)
   })
 
-  test('17. No console errors during 2D gameplay', async ({ page }) => {
+  // ── CAPTURE VERIFICATION ──
+  // Local PvP on 9×9. Black surrounds a White stone and captures it.
+  // Board positions (9×9): pos = row * 9 + col
+  // We place: Black(0,1), White(0,0), Black(1,0) — then verify White(0,0) is captured.
+  // Corner stone at (0,0) has only 2 liberties: (0,1) and (1,0).
+  // B occupies (0,1), then W plays (0,0), then B occupies (1,0) → W at (0,0) captured.
+  test('17. Captures work — corner capture in Local PvP', async ({ page }) => {
+    await page.goto('/')
+    await page.waitForSelector('.lobby-start:not([disabled])', { timeout: 15000 })
+    await page.click('.lobby-btn:has-text("Local PvP")')
+    await page.click('.lobby-start')
+
+    const canvas = page.locator('.board-2d-wrapper canvas')
+    await expect(canvas).toBeVisible()
+    const box = await canvas.boundingBox()
+    if (!box) throw new Error('Canvas bounding box missing')
+
+    // Read board metrics from the canvas. The GoBoard uses:
+    // padding=32, cellSize = floor((560-64)/(size-1)) clamped to 40 → 40 for 9×9
+    // gridX(col) = 32 + col * 40, gridY(row) = 32 + row * 40
+    const padding = 32
+    const cellSize = 40 // for 9×9: Math.min(Math.floor(496/8), 40) = 40
+
+    function gridPos(row: number, col: number) {
+      return {
+        x: box!.x + padding + col * cellSize,
+        y: box!.y + padding + row * cellSize,
+      }
+    }
+
+    // Move 1: Black plays (0,1) — next to the corner
+    const m1 = gridPos(0, 1)
+    await page.mouse.click(m1.x, m1.y)
+    await page.waitForTimeout(200)
+
+    // Move 2: White plays (0,0) — the corner (will be captured)
+    const m2 = gridPos(0, 0)
+    await page.mouse.click(m2.x, m2.y)
+    await page.waitForTimeout(200)
+
+    // Move 3: Black plays (1,0) — this captures White at (0,0)
+    const m3 = gridPos(1, 0)
+    await page.mouse.click(m3.x, m3.y)
+    await page.waitForTimeout(500)
+
+    // Verify capture: read pixel at (0,0) intersection.
+    // If captured, it should be board-colored (tan/gold), not white.
+    const pixelColor = await canvas.evaluate((el: HTMLCanvasElement, args: { x: number; y: number }) => {
+      const ctx = el.getContext('2d')!
+      const dpr = window.devicePixelRatio || 1
+      const pixel = ctx.getImageData(args.x * dpr, args.y * dpr, 1, 1).data
+      return { r: pixel[0], g: pixel[1], b: pixel[2] }
+    }, { x: padding, y: padding }) // position (0,0) → gridX(0)=32, gridY(0)=32
+
+    // White stone is rgb ~(240,240,240). Board is rgb ~(220,179,92).
+    // If captured, pixel should NOT be white (r > 230 && g > 230 && b > 230)
+    const isWhiteStone = pixelColor.r > 220 && pixelColor.g > 220 && pixelColor.b > 220
+    expect(isWhiteStone).toBe(false) // Stone should be gone — captured!
+  })
+
+  test('18. WASM engine captures — programmatic verification', async ({ page }) => {
+    await page.goto('/')
+    await page.waitForSelector('.lobby-start:not([disabled])', { timeout: 15000 })
+    await page.click('.lobby-start') // default 9×9 vs AI
+
+    // Wait for WASM to load, then test the engine directly
+    await page.waitForSelector('.board-2d-wrapper canvas', { timeout: 15000 })
+
+    const result = await page.evaluate(async () => {
+      // Access the WASM module that's already loaded
+      const wasm = await import('/pkg/go_engine.js')
+      await wasm.default() // re-init if needed (idempotent)
+      const game = new wasm.GoGame(9, 2)
+
+      // Set up: Black at (0,1), White at (0,0), Black at (1,0) captures White
+      game.play(1)    // Black at pos 1 = (0,1)
+      game.play(0)    // White at pos 0 = (0,0)
+      game.play(9)    // Black at pos 9 = (1,0) — captures White at (0,0)
+
+      const board = game.board_state()
+      const stoneAt00 = board[0] // Should be 255 (empty) after capture
+      const blackCaptures = game.captures(0) // Black captured 1 stone
+
+      game.free()
+      return { stoneAt00, blackCaptures }
+    })
+
+    expect(result.stoneAt00).toBe(255)  // Stone captured — empty
+    expect(result.blackCaptures).toBe(1) // Black captured one stone
+  })
+
+  test('19. No console errors during 2D gameplay', async ({ page }) => {
     const errors: string[] = []
     page.on('pageerror', err => errors.push(err.message))
     await page.goto('/')

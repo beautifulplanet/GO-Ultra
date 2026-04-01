@@ -90,5 +90,11 @@ export function useGoEngine(boardSize: number, players: number) {
     return game.dead_stones()
   }, [])
 
-  return { ready, state, play, pass, aiMoveSync, newGame, deadStones }
+  const setSuicide = useCallback((allowed: boolean) => {
+    const game = gameRef.current
+    if (!game) return
+    game.set_suicide(allowed)
+  }, [])
+
+  return { ready, state, play, pass, aiMoveSync, newGame, deadStones, setSuicide }
 }
