@@ -1,6 +1,7 @@
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect, useRef, useCallback } from 'react'
 import { useGoEngine } from './useGoEngine'
 import { SceneManager } from './three/SceneManager'
+import GoBoard from './GoBoard'
 import { Lobby } from './components/Lobby'
 import { PlayerPanel } from './components/PlayerPanel'
 import { ScorePanel } from './components/ScorePanel'
@@ -12,20 +13,25 @@ import './styles/animations.css'
 import './styles/themes.css'
 
 type Phase = 'lobby' | 'playing' | 'game_over'
+type RenderMode = '2d' | '3d'
 
 const PLAYER_COLORS_HEX = ['#1a1a1a', '#f0ead6', '#8B1A1A']
 const PLAYER_NAMES_SHORT = ['Obsidian', 'Ivory', 'Crimson']
 
+// Difficulty → MCTS iterations
+const DIFF_ITERATIONS = [10, 30, 60, 120, 250, 400, 600, 900, 1300, 2000]
+// Lower difficulties play random moves sometimes
+const DIFF_RANDOM_CHANCE = [0.7, 0.5, 0.35, 0.2, 0.1, 0.05, 0.02, 0.01, 0, 0]
+
 function App() {
   const [phase, setPhase] = useState<Phase>('lobby')
+  const [renderMode, setRenderMode] = useState<RenderMode>('2d')
   const [boardSize, setBoardSize] = useState(9)
   const [players, setPlayers] = useState(2)
-  const [opponent, setOpponent] = useState<'ai' | 'local'>('ai')
+  const [opponent, setOpponent] = useState<'ai' | 'local' | 'spectate'>('ai')
   const [timeControl, setTimeControl] = useState(0)
   const [thinking, setThinking] = useState(false)
   const [showSettings, setShowSettings] = useState(false)
-  const [showValidMoves, setShowValidMoves] = useState(true)
-  const [showTerritory, setShowTerritory] = useState(false)
   const [allowSuicide, setAllowSuicide] = useState(false)
   const [timeLeft, setTimeLeft] = useState(0)
   const [winner, setWinner] = useState<number | null>(null)
@@ -37,59 +43,46 @@ function App() {
 
   const { ready, state, play, pass, aiMoveSync, newGame } = useGoEngine(boardSize, players)
 
-  // Refs to avoid stale closures in event listeners
+  // Refs to avoid stale closures in 3D event listeners
   const stateRef = useRef(state)
   const thinkingRef = useRef(thinking)
   const opponentRef = useRef(opponent)
-  const playersRef = useRef(players)
   stateRef.current = state
   thinkingRef.current = thinking
   opponentRef.current = opponent
-  playersRef.current = players
 
-  // Map difficulty (1-10) to MCTS iterations, scaled by board size.
-  // Level 1 = near-random (10 iters), Level 10 = full strength (2000 iters on 9x9)
-  const DIFF_ITERATIONS = [10, 30, 60, 120, 250, 400, 600, 900, 1300, 2000]
-  // Lower difficulties also have a chance to play a random legal move instead
-  const DIFF_RANDOM_CHANCE = [0.7, 0.5, 0.35, 0.2, 0.1, 0.05, 0.02, 0.01, 0, 0]
-
-  const getIterations = () => {
+  const getIterations = useCallback(() => {
     const base = DIFF_ITERATIONS[Math.min(difficulty - 1, 9)]
-    // Scale down for larger boards to keep responsive
     if (boardSize >= 17) return Math.max(10, Math.floor(base * 0.4))
     if (boardSize >= 13) return Math.max(10, Math.floor(base * 0.6))
     return base
-  }
+  }, [difficulty, boardSize])
 
-  const getRandomChance = () => DIFF_RANDOM_CHANCE[Math.min(difficulty - 1, 9)]
+  const getRandomChance = useCallback(() => DIFF_RANDOM_CHANCE[Math.min(difficulty - 1, 9)], [difficulty])
 
-  // Pending config — set by handleStart, consumed by useEffect after DOM layout
-  const pendingConfigRef = useRef<{ boardSize: number; players: number } | null>(null)
-  const [sceneReady, setSceneReady] = useState(false)
-
-  // Start game from lobby
-  const handleStart = (config: { boardSize: number; players: number; opponent: string; timeControl: number; difficulty: number }) => {
+  // ── Start game from lobby ──
+  const handleStart = (config: {
+    boardSize: number; players: number; opponent: string;
+    timeControl: number; difficulty: number; renderMode: string
+  }) => {
     setBoardSize(config.boardSize)
     setPlayers(config.players)
-    setOpponent(config.opponent as 'ai' | 'local')
+    setOpponent(config.opponent as 'ai' | 'local' | 'spectate')
     setTimeControl(config.timeControl)
     setTimeLeft(config.timeControl)
     setDifficulty(config.difficulty)
+    setRenderMode(config.renderMode as RenderMode)
     setWinner(null)
-    setSceneReady(false)
+    setThinking(false)
     newGame(config.boardSize, config.players)
-    pendingConfigRef.current = { boardSize: config.boardSize, players: config.players }
     setPhase('playing')
   }
 
-  // Build Three.js scene AFTER phase switches to 'playing' — container is laid out
+  // ── 3D scene lifecycle ──
   useEffect(() => {
-    if (phase !== 'playing') return
+    if (phase !== 'playing' || renderMode !== '3d') return
     const container = sceneContainerRef.current
     if (!container) return
-    const cfg = pendingConfigRef.current
-    if (!cfg) return
-    pendingConfigRef.current = null
 
     // Clean up old scene
     if (sceneRef.current) {
@@ -97,23 +90,18 @@ function App() {
       sceneRef.current = null
     }
 
-    // Wait TWO frames: first for layout, second for dimensions to stabilize
-    let raf1 = 0
-    let raf2 = 0
-    raf1 = requestAnimationFrame(() => {
-      raf2 = requestAnimationFrame(() => {
-        const scene = new SceneManager(container, cfg.boardSize, 'high')
-        sceneRef.current = scene
-        scene.start()
-        setSceneReady(true) // triggers pointer-event binding
-      })
+    // Wait for layout
+    const raf = requestAnimationFrame(() => {
+      const scene = new SceneManager(container, boardSize, 'high')
+      sceneRef.current = scene
+      scene.start()
     })
-    return () => { cancelAnimationFrame(raf1); cancelAnimationFrame(raf2) }
-  }, [phase])
+    return () => { cancelAnimationFrame(raf) }
+  }, [phase, renderMode, boardSize])
 
-  // Wire up pointer events on the canvas — ONLY after scene is built
+  // ── 3D pointer events ──
   useEffect(() => {
-    if (!sceneReady) return
+    if (phase !== 'playing' || renderMode !== '3d') return
     const scene = sceneRef.current
     if (!scene) return
     const canvas = scene.getCanvas()
@@ -121,15 +109,10 @@ function App() {
     const onPointerDown = (e: PointerEvent) => {
       const s = stateRef.current
       if (!s || thinkingRef.current || s.isGameOver) return
-      // In AI mode, only human (player 0) can click
       if (opponentRef.current === 'ai' && s.turn !== 0) return
-
       const idx = scene.raycaster.getIntersection(e, canvas)
       if (idx >= 0 && s.legalMoves.has(idx)) {
-        const ok = play(idx)
-        if (ok) {
-          scene.particles.dustRing(idx, s.size)
-        }
+        play(idx)
       }
     }
 
@@ -145,45 +128,42 @@ function App() {
       canvas.removeEventListener('pointerdown', onPointerDown)
       canvas.removeEventListener('pointermove', onPointerMove)
     }
-  }, [sceneReady, play])
+  }, [phase, renderMode, play])
 
-  // Sync stones to 3D scene when state changes
+  // ── Sync stones to 3D scene ──
   useEffect(() => {
-    if (!state || !sceneRef.current) return
+    if (renderMode !== '3d' || !state || !sceneRef.current) return
     sceneRef.current.stones.syncBoard(state.board, state.size)
-  }, [state?.board, state?.moveCount])
+  }, [renderMode, state?.board, state?.moveCount])
 
-  // AI auto-move: after human plays, if it's AI's turn, trigger AI
-  // Uses a ref lock to prevent cascading re-triggers in 3-player mode
+  // ── AI auto-move — works for both 2D and 3D ──
   const aiLockRef = useRef(false)
   useEffect(() => {
-    if (phase !== 'playing' || !state || state.isGameOver || thinking) return
-    if (opponent !== 'ai') return
-    // AI plays for all non-zero players (player 0 is always human)
-    if (state.turn === 0) return
-    // Lock to prevent re-entry while AI is computing
+    if (phase !== 'playing' || !state || state.isGameOver) return
+    if (opponent === 'local') return
+    // In 'ai' mode: AI plays for all non-zero players (player 0 is human)
+    // In 'spectate' mode: AI plays for ALL players
+    if (opponent === 'ai' && state.turn === 0) { aiLockRef.current = false; return }
     if (aiLockRef.current) return
     aiLockRef.current = true
 
     setThinking(true)
-    // 350ms delay so stone drop animation finishes before AI responds
+    const delay = renderMode === '3d' ? 400 : (opponent === 'spectate' ? 600 : 150)
     const timeout = setTimeout(() => {
-      // At lower difficulties, sometimes play a random legal move
       const randomChance = getRandomChance()
       if (randomChance > 0 && Math.random() < randomChance && state.legalMoves.size > 0) {
         const moves = Array.from(state.legalMoves)
-        const randomMove = moves[Math.floor(Math.random() * moves.length)]
-        play(randomMove)
+        play(moves[Math.floor(Math.random() * moves.length)])
       } else {
         aiMoveSync(getIterations())
       }
       setThinking(false)
       aiLockRef.current = false
-    }, 350)
+    }, delay)
     return () => { clearTimeout(timeout); aiLockRef.current = false }
-  }, [state?.moveCount, state?.turn, phase, opponent, thinking])
+  }, [state?.moveCount, state?.turn, phase, opponent, renderMode, play, aiMoveSync, getIterations, getRandomChance])
 
-  // Game over detection
+  // ── Game over detection ──
   useEffect(() => {
     if (!state || !state.isGameOver || phase === 'game_over') return
     const scores = state.scores
@@ -193,14 +173,14 @@ function App() {
     }
     setWinner(w)
     setPhase('game_over')
-    if (sceneRef.current) {
+    if (renderMode === '3d' && sceneRef.current) {
       sceneRef.current.cameraCtrl.gameOverView()
       sceneRef.current.particles.confetti()
       sceneRef.current.stones.pulseWinner(state.board, w)
     }
-  }, [state?.isGameOver, players])
+  }, [state?.isGameOver, players, renderMode])
 
-  // Timer — only resets on turn change, not on thinking state
+  // ── Timer — resets on turn change only ──
   const passRef = useRef(pass)
   passRef.current = pass
   useEffect(() => {
@@ -215,71 +195,74 @@ function App() {
         return prev - 1
       })
     }, 1000)
-    return () => {
-      if (timerRef.current) clearInterval(timerRef.current)
-    }
+    return () => { if (timerRef.current) clearInterval(timerRef.current) }
   }, [phase, state?.turn, timeControl])
+
+  // ── Handlers ──
+  const handlePlay2D = useCallback((pos: number) => {
+    if (!state || thinking || state.isGameOver) return
+    if (opponent === 'ai' && state.turn !== 0) return
+    play(pos)
+  }, [state, thinking, opponent, play])
 
   const handlePass = () => {
     if (thinking || !state || state.isGameOver) return
+    if (opponent === 'spectate') return
     if (state.turn !== 0 && opponent === 'ai') return
     pass()
-    // AI response is handled by the auto-move useEffect
   }
 
   const handleNewGame = () => {
     setWinner(null)
     setThinking(false)
-    setSceneReady(false)
     aiLockRef.current = false
+    if (sceneRef.current) { sceneRef.current.dispose(); sceneRef.current = null }
     newGame(boardSize, players)
-    // Rebuild scene — dispose current, then toggle phase to force useEffect re-fire
-    if (sceneRef.current) {
-      sceneRef.current.dispose()
-      sceneRef.current = null
-    }
-    pendingConfigRef.current = { boardSize, players }
-    // Briefly set to lobby then back to playing to force the scene-creation effect
-    setPhase('lobby')
-    requestAnimationFrame(() => setPhase('playing'))
+    setPhase('playing')
   }
 
   const handleBackToLobby = () => {
-    if (sceneRef.current) {
-      sceneRef.current.dispose()
-      sceneRef.current = null
-    }
+    if (sceneRef.current) { sceneRef.current.dispose(); sceneRef.current = null }
     setPhase('lobby')
     setShowSettings(false)
     setThinking(false)
     setWinner(null)
   }
 
-  // LOBBY
+  // ── Cleanup on unmount ──
+  useEffect(() => {
+    return () => { if (sceneRef.current) { sceneRef.current.dispose() } }
+  }, [])
+
+  // ═══ RENDER ═══
+
   if (phase === 'lobby') {
-    return (
-      <>
-        <div ref={sceneContainerRef} className="scene-canvas" />
-        <Lobby onStart={handleStart} ready={ready} />
-      </>
-    )
+    return <Lobby onStart={handleStart} ready={ready} />
   }
 
   if (!state) return null
 
   const playerTypes = Array.from({ length: players }, (_, i) =>
+    opponent === 'spectate' ? 'AI' :
     i === 0 ? 'Human' : (opponent === 'ai' ? 'AI' : 'Human')
   )
-
   const capturesArr = Array.from({ length: players }, (_, i) => state.captures[i] || 0)
+  const isDisabled = thinking || state.isGameOver || opponent === 'spectate' || (state.turn !== 0 && opponent === 'ai')
 
   return (
     <>
-      {/* Three.js canvas container */}
-      <div ref={sceneContainerRef} className="scene-canvas" />
+      {/* 3D background (only in 3D mode) */}
+      {renderMode === '3d' && <div ref={sceneContainerRef} className="scene-canvas" />}
 
-      {/* 2D UI overlay */}
-      <div className="ui-overlay">
+      {/* 2D board (only in 2D mode) */}
+      {renderMode === '2d' && (
+        <div className="board-2d-wrapper">
+          <GoBoard state={state} onPlay={handlePlay2D} disabled={isDisabled} />
+        </div>
+      )}
+
+      {/* UI overlay */}
+      <div className={renderMode === '3d' ? 'ui-overlay' : 'ui-overlay ui-overlay-2d'}>
         <div className="header">
           Go Chronicle
           <button className="settings-btn" onClick={() => setShowSettings(true)}>⚙</button>
@@ -297,10 +280,10 @@ function App() {
           players={players}
           onPass={handlePass}
           onNewGame={handleNewGame}
-          disabled={thinking || state.isGameOver || (state.turn !== 0 && opponent === 'ai')}
+          disabled={isDisabled}
         />
 
-        {timeControl > 0 && phase === 'playing' && (
+        {timeControl > 0 && (
           <TimerBar
             timeLeft={timeLeft}
             totalTime={timeControl}
@@ -308,9 +291,7 @@ function App() {
           />
         )}
 
-        {thinking && (
-          <div className="thinking">AI thinking…</div>
-        )}
+        {thinking && <div className="thinking">AI thinking…</div>}
 
         {phase === 'game_over' && winner !== null && (
           <GameOverlay
@@ -323,10 +304,10 @@ function App() {
       {showSettings && (
         <SettingsModal
           onClose={() => setShowSettings(false)}
-          showValidMoves={showValidMoves}
-          setShowValidMoves={setShowValidMoves}
-          showTerritory={showTerritory}
-          setShowTerritory={setShowTerritory}
+          showValidMoves={false}
+          setShowValidMoves={() => {}}
+          showTerritory={false}
+          setShowTerritory={() => {}}
           allowSuicide={allowSuicide}
           setAllowSuicide={setAllowSuicide}
           onNewGame={handleNewGame}

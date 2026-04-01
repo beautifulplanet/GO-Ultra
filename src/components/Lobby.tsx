@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react'
 
 type Props = {
-  onStart: (config: { boardSize: number; players: number; opponent: string; timeControl: number; difficulty: number }) => void
+  onStart: (config: { boardSize: number; players: number; opponent: string; timeControl: number; difficulty: number; renderMode: string }) => void
   ready: boolean
 }
 
@@ -16,9 +16,10 @@ const DIFF_LABELS: Record<number, string> = {
 export function Lobby({ onStart, ready }: Props) {
   const [boardSize, setBoardSize] = useState(9)
   const [players, setPlayers] = useState(2)
-  const [opponent, setOpponent] = useState<'ai' | 'local'>('ai')
+  const [opponent, setOpponent] = useState<'ai' | 'local' | 'spectate'>('ai')
   const [timeControl, setTimeControl] = useState(0)
   const [difficulty, setDifficulty] = useState(5)
+  const [renderMode, setRenderMode] = useState<'2d' | '3d'>('2d')
   const [titleChars, setTitleChars] = useState(0)
 
   const title = 'Go Chronicle'
@@ -98,6 +99,14 @@ export function Lobby({ onStart, ready }: Props) {
           >
             Local PvP
           </button>
+          <button
+            className={`lobby-btn ${opponent === 'spectate' ? 'selected' : ''}`}
+            onClick={() => setOpponent('spectate')}
+            style={{ flex: 1 }}
+            title="Watch AIs battle each other"
+          >
+            AI vs AI
+          </button>
         </div>
 
         <div className="lobby-label">Time control</div>
@@ -113,7 +122,7 @@ export function Lobby({ onStart, ready }: Props) {
           ))}
         </div>
 
-        {opponent === 'ai' && (
+        {(opponent === 'ai' || opponent === 'spectate') && (
           <>
             <div className="lobby-label">AI Difficulty — {DIFF_LABELS[difficulty]}</div>
             <div className="lobby-row difficulty-row">
@@ -130,9 +139,27 @@ export function Lobby({ onStart, ready }: Props) {
           </>
         )}
 
+        <div className="lobby-label">Render mode</div>
+        <div className="lobby-row">
+          <button
+            className={`lobby-btn ${renderMode === '2d' ? 'selected' : ''}`}
+            onClick={() => setRenderMode('2d')}
+            style={{ flex: 1 }}
+          >
+            2D Classic
+          </button>
+          <button
+            className={`lobby-btn ${renderMode === '3d' ? 'selected' : ''}`}
+            onClick={() => setRenderMode('3d')}
+            style={{ flex: 1 }}
+          >
+            3D Scene
+          </button>
+        </div>
+
         <button
           className="lobby-start btn btn-accent"
-          onClick={() => onStart({ boardSize, players, opponent, timeControl, difficulty })}
+          onClick={() => onStart({ boardSize, players, opponent, timeControl, difficulty, renderMode })}
           disabled={!ready}
           style={{ opacity: ready ? 1 : 0.4 }}
         >
