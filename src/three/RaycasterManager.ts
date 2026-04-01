@@ -7,33 +7,33 @@ export class RaycasterManager {
   private camera: THREE.PerspectiveCamera
   private hitboxes: THREE.Mesh[] = []
   private hitboxGroup: THREE.Group
+  private hitMaterial: THREE.MeshBasicMaterial
   board: BoardRenderer
 
   constructor(camera: THREE.PerspectiveCamera, board: BoardRenderer) {
     this.camera = camera
     this.board = board
     this.hitboxGroup = new THREE.Group()
+    this.hitMaterial = new THREE.MeshBasicMaterial({ visible: false })
     board.group.add(this.hitboxGroup)
     this.buildHitboxes(board)
   }
 
   private buildHitboxes(board: BoardRenderer) {
-    // Clear old
+    // Clear old — only dispose geometry, NOT the shared material
     for (const h of this.hitboxes) {
       this.hitboxGroup.remove(h)
       h.geometry.dispose()
-      ;(h.material as THREE.Material).dispose()
     }
     this.hitboxes = []
 
     const size = board.boardSize
     const hitSize = board.boardScale * 0.9
-    const mat = new THREE.MeshBasicMaterial({ visible: false })
 
     for (let i = 0; i < size * size; i++) {
       const pos = board.indexToWorld(i, size)
       const geo = new THREE.PlaneGeometry(hitSize, hitSize)
-      const mesh = new THREE.Mesh(geo, mat)
+      const mesh = new THREE.Mesh(geo, this.hitMaterial)
       mesh.rotation.x = -Math.PI / 2
       mesh.position.set(pos.x, 0.01, pos.z)
       mesh.userData.boardIndex = i

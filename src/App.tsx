@@ -63,6 +63,10 @@ function App() {
 
   const getRandomChance = () => DIFF_RANDOM_CHANCE[Math.min(difficulty - 1, 9)]
 
+  // Pending config — set by handleStart, consumed by useEffect after DOM layout
+  const pendingConfigRef = useRef<{ boardSize: number; players: number } | null>(null)
+  const [sceneReady, setSceneReady] = useState(false)
+
   // Start game from lobby
   const handleStart = (config: { boardSize: number; players: number; opponent: string; timeControl: number; difficulty: number }) => {
     setBoardSize(config.boardSize)
@@ -72,11 +76,20 @@ function App() {
     setTimeLeft(config.timeControl)
     setDifficulty(config.difficulty)
     setWinner(null)
+    setSceneReady(false)
     newGame(config.boardSize, config.players)
+    pendingConfigRef.current = { boardSize: config.boardSize, players: config.players }
+    setPhase('playing')
+  }
 
-    // Build Three.js scene immediately
+  // Build Three.js scene AFTER phase switches to 'playing' — container is laid out
+  useEffect(() => {
+    if (phase !== 'playing') return
     const container = sceneContainerRef.current
     if (!container) return
+    const cfg = pendingConfigRef.current
+    if (!cfg) return
+    pendingConfigRef.current = null
 
     // Clean up old scene
     if (sceneRef.current) {
@@ -84,15 +97,23 @@ function App() {
       sceneRef.current = null
     }
 
-    const scene = new SceneManager(container, config.boardSize, 'high')
-    sceneRef.current = scene
-    scene.start()
-    setPhase('playing')
-  }
+    // Wait TWO frames: first for layout, second for dimensions to stabilize
+    let raf1 = 0
+    let raf2 = 0
+    raf1 = requestAnimationFrame(() => {
+      raf2 = requestAnimationFrame(() => {
+        const scene = new SceneManager(container, cfg.boardSize, 'high')
+        sceneRef.current = scene
+        scene.start()
+        setSceneReady(true) // triggers pointer-event binding
+      })
+    })
+    return () => { cancelAnimationFrame(raf1); cancelAnimationFrame(raf2) }
+  }, [phase])
 
-  // Wire up pointer events on the canvas — uses refs to avoid stale closures
+  // Wire up pointer events on the canvas — ONLY after scene is built
   useEffect(() => {
-    if (phase !== 'playing') return
+    if (!sceneReady) return
     const scene = sceneRef.current
     if (!scene) return
     const canvas = scene.getCanvas()
@@ -100,7 +121,8 @@ function App() {
     const onPointerDown = (e: PointerEvent) => {
       const s = stateRef.current
       if (!s || thinkingRef.current || s.isGameOver) return
-      if (s.turn !== 0 && opponentRef.current === 'ai') return
+      // In AI mode, only human (player 0) can click
+      if (opponentRef.current === 'ai' && s.turn !== 0) return
 
       const idx = scene.raycaster.getIntersection(e, canvas)
       if (idx >= 0 && s.legalMoves.has(idx)) {
@@ -123,7 +145,7 @@ function App() {
       canvas.removeEventListener('pointerdown', onPointerDown)
       canvas.removeEventListener('pointermove', onPointerMove)
     }
-  }, [phase, play])
+  }, [sceneReady, play])
 
   // Sync stones to 3D scene when state changes
   useEffect(() => {
@@ -132,13 +154,19 @@ function App() {
   }, [state?.board, state?.moveCount])
 
   // AI auto-move: after human plays, if it's AI's turn, trigger AI
+  // Uses a ref lock to prevent cascading re-triggers in 3-player mode
+  const aiLockRef = useRef(false)
   useEffect(() => {
     if (phase !== 'playing' || !state || state.isGameOver || thinking) return
     if (opponent !== 'ai') return
-    // AI plays for all non-zero players
+    // AI plays for all non-zero players (player 0 is always human)
     if (state.turn === 0) return
+    // Lock to prevent re-entry while AI is computing
+    if (aiLockRef.current) return
+    aiLockRef.current = true
 
     setThinking(true)
+    // 350ms delay so stone drop animation finishes before AI responds
     const timeout = setTimeout(() => {
       // At lower difficulties, sometimes play a random legal move
       const randomChance = getRandomChance()
@@ -150,9 +178,10 @@ function App() {
         aiMoveSync(getIterations())
       }
       setThinking(false)
-    }, 80)
-    return () => clearTimeout(timeout)
-  }, [state?.moveCount, state?.turn, phase, opponent])
+      aiLockRef.current = false
+    }, 350)
+    return () => { clearTimeout(timeout); aiLockRef.current = false }
+  }, [state?.moveCount, state?.turn, phase, opponent, thinking])
 
   // Game over detection
   useEffect(() => {
@@ -171,14 +200,16 @@ function App() {
     }
   }, [state?.isGameOver, players])
 
-  // Timer
+  // Timer — only resets on turn change, not on thinking state
+  const passRef = useRef(pass)
+  passRef.current = pass
   useEffect(() => {
-    if (phase !== 'playing' || timeControl <= 0 || thinking) return
+    if (phase !== 'playing' || timeControl <= 0) return
     setTimeLeft(timeControl)
     timerRef.current = setInterval(() => {
       setTimeLeft(prev => {
         if (prev <= 1) {
-          pass()
+          passRef.current()
           return timeControl
         }
         return prev - 1
@@ -187,7 +218,7 @@ function App() {
     return () => {
       if (timerRef.current) clearInterval(timerRef.current)
     }
-  }, [phase, state?.turn, thinking, timeControl, pass])
+  }, [phase, state?.turn, timeControl])
 
   const handlePass = () => {
     if (thinking || !state || state.isGameOver) return
@@ -199,16 +230,18 @@ function App() {
   const handleNewGame = () => {
     setWinner(null)
     setThinking(false)
+    setSceneReady(false)
+    aiLockRef.current = false
     newGame(boardSize, players)
-    // Rebuild scene
-    const container = sceneContainerRef.current
-    if (container && sceneRef.current) {
+    // Rebuild scene — dispose current, then toggle phase to force useEffect re-fire
+    if (sceneRef.current) {
       sceneRef.current.dispose()
-      const scene = new SceneManager(container, boardSize, 'high')
-      sceneRef.current = scene
-      scene.start()
+      sceneRef.current = null
     }
-    setPhase('playing')
+    pendingConfigRef.current = { boardSize, players }
+    // Briefly set to lobby then back to playing to force the scene-creation effect
+    setPhase('lobby')
+    requestAnimationFrame(() => setPhase('playing'))
   }
 
   const handleBackToLobby = () => {
