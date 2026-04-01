@@ -10,9 +10,12 @@
     "wasm": "cd go-engine && wasm-pack build --target web --out-dir ../pkg"
   },
   "dependencies": {
+    "@types/three": "^0.183.1",
+    "go-engine": "file:./pkg",
+    "gsap": "^3.14.2",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
-    "go-engine": "file:./pkg"
+    "three": "^0.183.2"
   },
   "devDependencies": {
     "@types/react": "^18.3.18",

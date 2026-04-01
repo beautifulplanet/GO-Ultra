@@ -1,0 +1,32 @@
+/* Board themes — control wood tint and grid line color */
+/* Sky does NOT change. Sky is always the Mario 64 sunset. */
+
+:root {
+  --board-color: #dcb35c;
+  --grid-color: #1a1a1a;
+}
+
+[data-theme="classic"] {
+  --board-color: #dcb35c;
+  --grid-color: #1a1a1a;
+}
+
+[data-theme="slate"] {
+  --board-color: #6b7b8d;
+  --grid-color: #2a2a3a;
+}
+
+[data-theme="cherry"] {
+  --board-color: #8b3a3a;
+  --grid-color: #1a0a0a;
+}
+
+[data-theme="neon"] {
+  --board-color: #1a2a3a;
+  --grid-color: #00ffaa;
+}
+
+[data-theme="ink"] {
+  --board-color: #2a2a2a;
+  --grid-color: #888888;
+}
