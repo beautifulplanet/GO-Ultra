@@ -1,0 +1,29 @@
+# Dependencies
+node_modules/
+
+# Rust build artifacts
+go-engine/target/
+go-engine/target-dbg/
+go-engine/target-test/
+
+# WASM build output (rebuild from source)
+pkg/
+
+# Vite build output
+dist/
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# IDE
+.idea/
+*.swp
+*.swo
+
+# Environment
+.env
+.env.local
+.vercel
+
+# Lock files kept: package-lock.json, Cargo.lock
