@@ -29,6 +29,7 @@ function App() {
   const [allowSuicide, setAllowSuicide] = useState(false)
   const [timeLeft, setTimeLeft] = useState(0)
   const [winner, setWinner] = useState<number | null>(null)
+  const [difficulty, setDifficulty] = useState(5)
 
   const sceneContainerRef = useRef<HTMLDivElement>(null)
   const sceneRef = useRef<SceneManager | null>(null)
@@ -46,20 +47,30 @@ function App() {
   opponentRef.current = opponent
   playersRef.current = players
 
-  // Scale iterations by board size
+  // Map difficulty (1-10) to MCTS iterations, scaled by board size.
+  // Level 1 = near-random (10 iters), Level 10 = full strength (2000 iters on 9x9)
+  const DIFF_ITERATIONS = [10, 30, 60, 120, 250, 400, 600, 900, 1300, 2000]
+  // Lower difficulties also have a chance to play a random legal move instead
+  const DIFF_RANDOM_CHANCE = [0.7, 0.5, 0.35, 0.2, 0.1, 0.05, 0.02, 0.01, 0, 0]
+
   const getIterations = () => {
-    if (boardSize <= 9) return 500
-    if (boardSize <= 13) return 300
-    return 200
+    const base = DIFF_ITERATIONS[Math.min(difficulty - 1, 9)]
+    // Scale down for larger boards to keep responsive
+    if (boardSize >= 17) return Math.max(10, Math.floor(base * 0.4))
+    if (boardSize >= 13) return Math.max(10, Math.floor(base * 0.6))
+    return base
   }
 
+  const getRandomChance = () => DIFF_RANDOM_CHANCE[Math.min(difficulty - 1, 9)]
+
   // Start game from lobby
-  const handleStart = (config: { boardSize: number; players: number; opponent: string; timeControl: number }) => {
+  const handleStart = (config: { boardSize: number; players: number; opponent: string; timeControl: number; difficulty: number }) => {
     setBoardSize(config.boardSize)
     setPlayers(config.players)
     setOpponent(config.opponent as 'ai' | 'local')
     setTimeControl(config.timeControl)
     setTimeLeft(config.timeControl)
+    setDifficulty(config.difficulty)
     setWinner(null)
     newGame(config.boardSize, config.players)
 
@@ -129,9 +140,17 @@ function App() {
 
     setThinking(true)
     const timeout = setTimeout(() => {
-      aiMoveSync(getIterations())
+      // At lower difficulties, sometimes play a random legal move
+      const randomChance = getRandomChance()
+      if (randomChance > 0 && Math.random() < randomChance && state.legalMoves.size > 0) {
+        const moves = Array.from(state.legalMoves)
+        const randomMove = moves[Math.floor(Math.random() * moves.length)]
+        play(randomMove)
+      } else {
+        aiMoveSync(getIterations())
+      }
       setThinking(false)
-    }, 80) // small delay so the UI shows the human's stone first
+    }, 80)
     return () => clearTimeout(timeout)
   }, [state?.moveCount, state?.turn, phase, opponent])
 

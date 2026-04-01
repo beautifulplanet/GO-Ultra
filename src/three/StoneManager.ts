@@ -94,15 +94,17 @@ export class StoneManager {
           delay: 0.08,
         })
 
-        // Fade out and remove
-        ;(mesh.material as THREE.MeshStandardMaterial).transparent = true
-        gsap.to(mesh.material as any, {
+        // Fade out and remove — do NOT dispose shared geometry/material
+        const matClone = (mesh.material as THREE.MeshStandardMaterial).clone()
+        matClone.transparent = true
+        mesh.material = matClone
+        gsap.to(matClone, {
           opacity: 0,
           duration: 0.2,
           delay: 0.3,
           onComplete: () => {
             this.board.group.remove(mesh)
-            mesh.geometry.dispose()
+            matClone.dispose() // only dispose the clone
             completed++
             if (completed >= indices.length) resolve()
           },

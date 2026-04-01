@@ -1,18 +1,24 @@
 import { useState, useEffect } from 'react'
 
 type Props = {
-  onStart: (config: { boardSize: number; players: number; opponent: string; timeControl: number }) => void
+  onStart: (config: { boardSize: number; players: number; opponent: string; timeControl: number; difficulty: number }) => void
   ready: boolean
 }
 
 const SIZES = [9, 13, 15, 17, 19] as const
 const TIME_OPTIONS = [0, 10, 30, 60] as const
+const DIFFICULTIES = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10] as const
+const DIFF_LABELS: Record<number, string> = {
+  1: 'Random', 2: 'Beginner', 3: 'Novice', 4: 'Casual', 5: 'Club',
+  6: 'Strong', 7: 'Expert', 8: 'Master', 9: 'Pro', 10: 'Demon',
+}
 
 export function Lobby({ onStart, ready }: Props) {
   const [boardSize, setBoardSize] = useState(9)
   const [players, setPlayers] = useState(2)
   const [opponent, setOpponent] = useState<'ai' | 'local'>('ai')
   const [timeControl, setTimeControl] = useState(0)
+  const [difficulty, setDifficulty] = useState(5)
   const [titleChars, setTitleChars] = useState(0)
 
   const title = 'Go Chronicle'
@@ -107,9 +113,26 @@ export function Lobby({ onStart, ready }: Props) {
           ))}
         </div>
 
+        {opponent === 'ai' && (
+          <>
+            <div className="lobby-label">AI Difficulty — {DIFF_LABELS[difficulty]}</div>
+            <div className="lobby-row difficulty-row">
+              {DIFFICULTIES.map(d => (
+                <button
+                  key={d}
+                  className={`lobby-btn diff-btn ${difficulty === d ? 'selected' : ''}`}
+                  onClick={() => setDifficulty(d)}
+                >
+                  {d}
+                </button>
+              ))}
+            </div>
+          </>
+        )}
+
         <button
           className="lobby-start btn btn-accent"
-          onClick={() => onStart({ boardSize, players, opponent, timeControl })}
+          onClick={() => onStart({ boardSize, players, opponent, timeControl, difficulty })}
           disabled={!ready}
           style={{ opacity: ready ? 1 : 0.4 }}
         >

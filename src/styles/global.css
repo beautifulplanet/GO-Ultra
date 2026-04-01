@@ -301,6 +301,19 @@ body {
   font-weight: 600;
 }
 
+.difficulty-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.diff-btn {
+  min-width: 32px;
+  padding: 6px 8px;
+  font-size: 0.75rem;
+  text-align: center;
+}
+
 .lobby-start {
   width: 100%;
   margin-top: 24px;
