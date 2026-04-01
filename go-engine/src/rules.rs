@@ -9,10 +9,13 @@ pub fn find_group(board: &Board, position: u16, player: u8) -> [u128; 3] {
     let mut group = [0u128; 3];
     let mut stack = vec![position];
     bit_set(&mut group, position);
+    let player_stones = &board.stones[player as usize];
 
     while let Some(p) = stack.pop() {
-        for n in neighbors(p, board.size) {
-            if !bit_test(&group, n) && bit_test(&board.stones[player as usize], n) {
+        let (nbrs, cnt) = neighbors_array(p, board.size);
+        for i in 0..cnt as usize {
+            let n = nbrs[i];
+            if !bit_test(&group, n) && bit_test(player_stones, n) {
                 bit_set(&mut group, n);
                 stack.push(n);
             }
@@ -25,14 +28,13 @@ pub fn find_group(board: &Board, position: u16, player: u8) -> [u128; 3] {
 pub fn count_liberties(board: &Board, group: &[u128; 3]) -> u32 {
     let mut liberties = [0u128; 3];
     let occupied = board.all_stones();
-    let total = board.total_positions();
 
-    for p in 0..total {
-        if bit_test(group, p) {
-            for n in neighbors(p, board.size) {
-                if !bit_test(&occupied, n) {
-                    bit_set(&mut liberties, n);
-                }
+    for p in bits_iter(group) {
+        let (nbrs, cnt) = neighbors_array(p, board.size);
+        for i in 0..cnt as usize {
+            let n = nbrs[i];
+            if !bit_test(&occupied, n) {
+                bit_set(&mut liberties, n);
             }
         }
     }
@@ -44,11 +46,8 @@ pub fn count_liberties(board: &Board, group: &[u128; 3]) -> u32 {
 fn remove_group(board: &mut Board, group: &[u128; 3], owner: u8, captured_by: u8) {
     let count = bits_count(group);
     board.captures[captured_by as usize] += count;
-    let total = board.total_positions();
-    for p in 0..total {
-        if bit_test(group, p) {
-            board.remove_stone(owner, p);
-        }
+    for p in bits_iter(group) {
+        board.remove_stone(owner, p);
     }
 }
 
@@ -77,18 +76,17 @@ pub fn is_legal(board: &Board, position: u16) -> bool {
 
     // Check if any opponent groups are captured by this move
     let mut any_capture = false;
+    let (nbrs, cnt) = neighbors_array(position, board.size);
     for opp in 0..board.active_players {
         if opp == player { continue; }
-        for n in neighbors(position, board.size) {
+        for i in 0..cnt as usize {
+            let n = nbrs[i];
             if bit_test(&test_board.stones[opp as usize], n) {
                 let group = find_group(&test_board, n, opp);
                 if count_liberties(&test_board, &group) == 0 {
                     any_capture = true;
-                    let total = test_board.total_positions();
-                    for p in 0..total {
-                        if bit_test(&group, p) {
-                            test_board.remove_stone(opp, p);
-                        }
+                    for p in bits_iter(&group) {
+                        test_board.remove_stone(opp, p);
                     }
                 }
             }
@@ -122,9 +120,10 @@ pub fn place_stone(board: &mut Board, position: u16) {
     // Check all opponent groups adjacent to the placed stone
     for opp in 0..board.active_players {
         if opp == player { continue; }
-        // Collect neighbors first to avoid borrow issues
-        let nbrs = neighbors(position, board.size);
-        for n in nbrs {
+        // Use stack-allocated neighbors — no heap allocation
+        let (nbrs, cnt) = neighbors_array(position, board.size);
+        for i in 0..cnt as usize {
+            let n = nbrs[i];
             if bit_test(&board.stones[opp as usize], n) {
                 let group = find_group(board, n, opp);
                 if count_liberties(board, &group) == 0 {
@@ -132,12 +131,7 @@ pub fn place_stone(board: &mut Board, position: u16) {
                     total_captured += count;
                     if count == 1 {
                         // Track for ko detection
-                        for p in 0..board.total_positions() {
-                            if bit_test(&group, p) {
-                                last_captured_pos = Some(p);
-                                break;
-                            }
-                        }
+                        last_captured_pos = Some(bits_iter(&group).next().unwrap());
                         single_capture = true;
                     } else {
                         single_capture = false;
@@ -220,7 +214,9 @@ pub fn area_score(board: &Board) -> Vec<f32> {
         bit_set(&mut visited, p);
 
         while let Some(pos) = stack.pop() {
-            for n in neighbors(pos, board.size) {
+            let (nbrs, cnt) = neighbors_array(pos, board.size);
+            for i in 0..cnt as usize {
+                let n = nbrs[i];
                 if bit_test(&visited, n) || bit_test(&region, n) {
                     continue;
                 }
@@ -269,10 +265,8 @@ pub fn detect_dead_stones(board: &Board) -> Vec<u16> {
         let group = find_group(board, p, owner);
 
         // Mark as checked
-        for i in 0..total {
-            if bit_test(&group, i) {
-                bit_set(&mut checked, i);
-            }
+        for g in bits_iter(&group) {
+            bit_set(&mut checked, g);
         }
 
         let libs = count_liberties(board, &group);
@@ -283,22 +277,19 @@ pub fn detect_dead_stones(board: &Board) -> Vec<u16> {
         if libs <= 1 && group_size <= 6 {
             // Check if surrounded by single opponent
             let mut surrounding_players: u8 = 0;
-            for i in 0..total {
-                if bit_test(&group, i) {
-                    for n in neighbors(i, board.size) {
-                        if let Some(adj_owner) = board.get_stone(n) {
-                            if adj_owner != owner {
-                                surrounding_players |= 1 << adj_owner;
-                            }
+            for g in bits_iter(&group) {
+                let (nbrs, cnt) = neighbors_array(g, board.size);
+                for i in 0..cnt as usize {
+                    if let Some(adj_owner) = board.get_stone(nbrs[i]) {
+                        if adj_owner != owner {
+                            surrounding_players |= 1 << adj_owner;
                         }
                     }
                 }
             }
             if surrounding_players.count_ones() == 1 {
-                for i in 0..total {
-                    if bit_test(&group, i) {
-                        dead.push(i);
-                    }
+                for g in bits_iter(&group) {
+                    dead.push(g);
                 }
             }
         }
