@@ -29,8 +29,10 @@ export default function GoBoard({ state, onPlay, disabled }: Props) {
   const [captureFlash, setCaptureFlash] = useState<Set<number>>(new Set())
   const { board, size, legalMoves, ko } = state
 
-  const padding = 32
-  const cellSize = Math.min(Math.floor((560 - 2 * padding) / (size - 1)), 40)
+  // Responsive board sizing — fills available space
+  const padding = 40
+  const maxBoardPx = typeof window !== 'undefined' ? Math.min(window.innerWidth, window.innerHeight) - 120 : 600
+  const cellSize = Math.max(20, Math.floor((maxBoardPx - 2 * padding) / (size - 1)))
   const boardPx = cellSize * (size - 1) + 2 * padding
   const stoneR = Math.floor(cellSize * 0.44)
 

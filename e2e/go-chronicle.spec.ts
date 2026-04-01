@@ -224,11 +224,14 @@ test.describe('Go Chronicle E2E', () => {
     const box = await canvas.boundingBox()
     if (!box) throw new Error('Canvas bounding box missing')
 
-    // Read board metrics from the canvas. The GoBoard uses:
-    // padding=32, cellSize = floor((560-64)/(size-1)) clamped to 40 → 40 for 9×9
-    // gridX(col) = 32 + col * 40, gridY(row) = 32 + row * 40
-    const padding = 32
-    const cellSize = 40 // for 9×9: Math.min(Math.floor(496/8), 40) = 40
+    // Read actual board dimensions from the rendered canvas
+    const dims = await canvas.evaluate((el: HTMLCanvasElement) => {
+      const styleW = parseInt(el.style.width) || el.clientWidth
+      return { width: styleW }
+    })
+    // Responsive sizing: padding=40, cellSize = (boardPx - 80) / 8 for 9x9
+    const padding = 40
+    const cellSize = (dims.width - 2 * padding) / 8
 
     function gridPos(row: number, col: number) {
       return {
@@ -311,8 +314,16 @@ test.describe('Go Chronicle E2E', () => {
     const box = await canvas.boundingBox()
     if (!box) throw new Error('Canvas bounding box missing')
 
-    const padding = 32
-    const cellSize = 40
+    // Read actual board dimensions from the rendered canvas
+    const dims = await canvas.evaluate((el: HTMLCanvasElement) => {
+      const styleW = parseInt(el.style.width) || el.clientWidth
+      return { width: styleW }
+    })
+    // Reverse-engineer cellSize: boardPx = cellSize*(size-1) + 2*padding
+    // For 9x9: padding=40, so cellSize = (boardPx - 80) / 8
+    const padding = 40
+    const boardPx = dims.width
+    const cellSize = (boardPx - 2 * padding) / 8
 
     function clickGrid(row: number, col: number) {
       return page.mouse.click(box!.x + padding + col * cellSize, box!.y + padding + row * cellSize)
@@ -368,7 +379,7 @@ test.describe('Go Chronicle E2E', () => {
       const dpr = window.devicePixelRatio || 1
       const pixel = ctx.getImageData(args.x * dpr, args.y * dpr, 1, 1).data
       return { r: pixel[0], g: pixel[1], b: pixel[2] }
-    }, { x: padding, y: padding })
+    }, { x: padding, y: padding })  // (0,0) grid position = (padding, padding) in canvas
 
     // White stone is rgb ~(240,240,240). Board is rgb ~(220,179,92).
     const isWhiteStone = pixelColor.r > 220 && pixelColor.g > 220 && pixelColor.b > 220
