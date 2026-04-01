@@ -1,6 +1,7 @@
 // board.rs — Board struct, creation, stone placement/removal
 
 use crate::utils::*;
+use std::sync::Arc;
 
 /// The core Go board representation using bitboards.
 /// Each player has a [u128; 3] = 384 bits, covering boards up to 19×19 (361 intersections).
@@ -25,8 +26,8 @@ pub struct Board {
     pub allow_suicide: bool,
     /// Captured stone counts per player (stones captured BY this player)
     pub captures: [u32; 3],
-    /// Precomputed neighbor masks for every position
-    pub neighbor_masks: Vec<[u128; 3]>,
+    /// Precomputed neighbor masks for every position (shared via Arc — free to clone)
+    pub neighbor_masks: Arc<Vec<[u128; 3]>>,
     /// Bitmask of all valid positions on the board
     pub board_mask: [u128; 3],
     /// Move history for ko detection
@@ -44,7 +45,7 @@ impl Board {
             assert!(size >= 13, "3-player requires board size >= 13");
         }
 
-        let neighbor_masks = precompute_neighbor_masks(size);
+        let neighbor_masks = Arc::new(precompute_neighbor_masks(size));
         let board_mask = full_board_mask(size);
         let komi = if players == 2 { 6.5 } else { 0.0 };
 
