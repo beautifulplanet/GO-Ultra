@@ -5,13 +5,13 @@ export default defineConfig({
   timeout: 30000,
   retries: 0,
   use: {
-    baseURL: 'http://localhost:5176',
+    baseURL: 'http://localhost:5177',
     headless: true,
     viewport: { width: 1280, height: 720 },
   },
   webServer: {
-    command: 'npx vite --port 5176',
-    port: 5176,
+    command: 'npx vite --port 5177 --force',
+    port: 5177,
     reuseExistingServer: true,
     timeout: 15000,
   },

@@ -1,4 +1,4 @@
-import { useRef, useEffect, useCallback } from 'react'
+import { useRef, useEffect, useCallback, useState } from 'react'
 import type { GameState } from './useGoEngine'
 
 type Props = {
@@ -25,6 +25,8 @@ const STAR_POINTS: Record<number, [number, number][]> = {
 
 export default function GoBoard({ state, onPlay, disabled }: Props) {
   const canvasRef = useRef<HTMLCanvasElement>(null)
+  const prevBoardRef = useRef<Uint8Array | null>(null)
+  const [captureFlash, setCaptureFlash] = useState<Set<number>>(new Set())
   const { board, size, legalMoves, ko } = state
 
   const padding = 32
@@ -122,11 +124,48 @@ export default function GoBoard({ state, onPlay, disabled }: Props) {
       ctx.strokeRect(gridX(kc) - ks, gridY(kr) - ks, ks * 2, ks * 2)
     }
 
+    // Capture flash markers — orange X at recently captured positions
+    for (const pos of captureFlash) {
+      const r = Math.floor(pos / size)
+      const c = pos % size
+      const x = gridX(c)
+      const y = gridY(r)
+      ctx.strokeStyle = '#ff6600'
+      ctx.lineWidth = 3
+      const hs = stoneR * 0.5
+      ctx.beginPath()
+      ctx.moveTo(x - hs, y - hs)
+      ctx.lineTo(x + hs, y + hs)
+      ctx.moveTo(x + hs, y - hs)
+      ctx.lineTo(x - hs, y + hs)
+      ctx.stroke()
+    }
+
     // Last move marker (current turn just changed, so highlight the move before)
     // We skip this for now — can add move history later
 
     // Hover hint for legal moves is handled via onMouseMove
-  }, [board, size, ko, boardPx, cellSize, stoneR])
+  }, [board, size, ko, boardPx, cellSize, stoneR, captureFlash])
+
+  // Detect captures by comparing previous board to current
+  useEffect(() => {
+    const prev = prevBoardRef.current
+    if (prev && prev.length === board.length) {
+      const newCaptures = new Set<number>()
+      for (let i = 0; i < board.length; i++) {
+        // Position had a stone (not empty) but now is empty
+        if (prev[i] !== 255 && board[i] === 255) {
+          newCaptures.add(i)
+        }
+      }
+      if (newCaptures.size > 0) {
+        setCaptureFlash(newCaptures)
+        // Clear flash after 800ms
+        setTimeout(() => setCaptureFlash(new Set()), 800)
+      }
+    }
+    prevBoardRef.current = new Uint8Array(board) // copy
+  }, [board])
 
   useEffect(() => { draw() }, [draw])
 

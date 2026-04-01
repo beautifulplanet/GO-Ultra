@@ -298,6 +298,83 @@ test.describe('Go Chronicle E2E', () => {
     expect(result.blackCaptures).toBe(1) // Black captured one stone
   })
 
+  // ── FULL CAPTURE FLOW: Click-based capture in Local PvP ──
+  // This tests the ACTUAL user flow: clicking the canvas, state updating, canvas redrawing
+  test('19. Full capture flow — click, state, render', async ({ page }) => {
+    await page.goto('/')
+    await page.waitForSelector('.lobby-start:not([disabled])', { timeout: 15000 })
+    await page.click('.lobby-btn:has-text("Local PvP")')
+    await page.click('.lobby-start')
+
+    const canvas = page.locator('.board-2d-wrapper canvas')
+    await expect(canvas).toBeVisible({ timeout: 10000 })
+    const box = await canvas.boundingBox()
+    if (!box) throw new Error('Canvas bounding box missing')
+
+    const padding = 32
+    const cellSize = 40
+
+    function clickGrid(row: number, col: number) {
+      return page.mouse.click(box!.x + padding + col * cellSize, box!.y + padding + row * cellSize)
+    }
+
+    // Step 1: Black plays (0,1) — right of corner
+    await clickGrid(0, 1)
+    await page.waitForTimeout(300)
+
+    // Verify state after move 1 via DOM query
+    const afterMove1 = await page.evaluate(() => {
+      // Read capture count from the player panel
+      const cards = document.querySelectorAll('.player-card .info')
+      return {
+        obsidianInfo: cards[0]?.textContent || '',
+        ivoryInfo: cards[1]?.textContent || '',
+      }
+    })
+    // No captures yet
+    expect(afterMove1.obsidianInfo).toContain('Captures: 0')
+
+    // Step 2: White plays (0,0) — corner (will be captured)
+    await clickGrid(0, 0)
+    await page.waitForTimeout(300)
+
+    // Step 3: Black plays some other move far away — White is not yet captured
+    // Black plays (4,4) — center
+    await clickGrid(4, 4)
+    await page.waitForTimeout(300)
+
+    // Step 4: White plays somewhere far away — (4,5)
+    await clickGrid(4, 5)
+    await page.waitForTimeout(300)
+
+    // Step 5: Black plays (1,0) — this captures White's corner stone at (0,0)!
+    await clickGrid(1, 0)
+    await page.waitForTimeout(500)
+
+    // Verify capture happened via DOM
+    const afterCapture = await page.evaluate(() => {
+      const cards = document.querySelectorAll('.player-card .info')
+      return {
+        obsidianInfo: cards[0]?.textContent || '',
+        ivoryInfo: cards[1]?.textContent || '',
+      }
+    })
+    // Black should have 1 capture now
+    expect(afterCapture.obsidianInfo).toContain('Captures: 1')
+
+    // Verify via canvas pixel — position (0,0) should be board color, not white
+    const pixelColor = await canvas.evaluate((el: HTMLCanvasElement, args: { x: number; y: number }) => {
+      const ctx = el.getContext('2d')!
+      const dpr = window.devicePixelRatio || 1
+      const pixel = ctx.getImageData(args.x * dpr, args.y * dpr, 1, 1).data
+      return { r: pixel[0], g: pixel[1], b: pixel[2] }
+    }, { x: padding, y: padding })
+
+    // White stone is rgb ~(240,240,240). Board is rgb ~(220,179,92).
+    const isWhiteStone = pixelColor.r > 220 && pixelColor.g > 220 && pixelColor.b > 220
+    expect(isWhiteStone).toBe(false) // Stone should be gone
+  })
+
   test('19. No console errors during 2D gameplay', async ({ page }) => {
     const errors: string[] = []
     page.on('pageerror', err => errors.push(err.message))
