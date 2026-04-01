@@ -13,6 +13,13 @@ function App() {
 
   const { ready, state, play, pass, aiMoveSync, newGame } = useGoEngine(boardSize, players)
 
+  // Scale AI iterations by board size — bigger boards need fewer iterations to stay responsive
+  const getIterations = useCallback(() => {
+    if (boardSize <= 9) return 150
+    if (boardSize <= 13) return 80
+    return 40 // 19x19
+  }, [boardSize])
+
   // AI auto-move
   useEffect(() => {
     if (!started || !state || state.isGameOver || thinking) return
@@ -21,9 +28,9 @@ function App() {
 
     setThinking(true)
     const t = setTimeout(() => {
-      aiMoveSync(200)
+      aiMoveSync(getIterations())
       setThinking(false)
-    }, 200)
+    }, 100)
     return () => clearTimeout(t)
   }, [started, state?.moveCount, state?.turn, mode, thinking, aiMoveSync])
 
