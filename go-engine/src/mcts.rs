@@ -44,6 +44,12 @@ fn find_urgent_capture(board: &Board, legal_moves: &[u16]) -> Option<u16> {
     let total = board.total_positions();
     let mut checked = [0u128; 3];
 
+    // Build a bitboard of legal moves for O(1) lookup
+    let mut legal_bits = [0u128; 3];
+    for &m in legal_moves {
+        bit_set(&mut legal_bits, m);
+    }
+
     for opp in 0..board.active_players {
         if opp == player { continue; }
         for p in 0..total {
@@ -51,18 +57,18 @@ fn find_urgent_capture(board: &Board, legal_moves: &[u16]) -> Option<u16> {
                 continue;
             }
             let group = find_group(board, p, opp);
-            for i in 0..total {
-                if bit_test(&group, i) { bit_set(&mut checked, i); }
+            for g in bits_iter(&group) {
+                bit_set(&mut checked, g);
             }
 
             if count_liberties(board, &group) == 1 && bits_count(&group) >= 2 {
                 // Find the liberty position
-                for i in 0..total {
-                    if bit_test(&group, i) {
-                        for n in neighbors(i, board.size) {
-                            if board.is_empty(n) && legal_moves.contains(&n) {
-                                return Some(n);
-                            }
+                for g in bits_iter(&group) {
+                    let (nbrs, cnt) = neighbors_array(g, board.size);
+                    for i in 0..cnt as usize {
+                        let n = nbrs[i];
+                        if board.is_empty(n) && bit_test(&legal_bits, n) {
+                            return Some(n);
                         }
                     }
                 }
@@ -156,19 +162,35 @@ fn mcts_iterate(node: &mut MctsNode, board: &mut Board, root_player: u8, rng: &m
 
 fn simulate(board: &mut Board, rng: &mut SmallRng) -> Vec<f32> {
     let mut moves_made = 0;
-    let max_moves = (board.size as u32) * (board.size as u32) * 3;
+    let max_moves = (board.size as u32) * (board.size as u32);
+    let mut consecutive_passes = 0u32;
 
-    while !is_game_over(board) && moves_made < max_moves {
-        let legal = get_legal_moves(board);
-        if legal.is_empty() || rng.gen_bool(0.1) {
+    while consecutive_passes < board.active_players as u32 && moves_made < max_moves {
+        // Light playout: pick random empty positions, try them
+        let empty = board.empty_positions();
+        let empty_count = bits_count(&empty);
+
+        if empty_count == 0 || rng.gen_bool(0.1) {
             pass_turn(board);
+            consecutive_passes += 1;
         } else {
-            // Heavy playout: prefer capturing atari groups
-            if let Some(cap) = find_urgent_capture(board, &legal) {
-                place_stone(board, cap);
-            } else {
-                let idx = rng.gen_range(0..legal.len());
-                place_stone(board, legal[idx]);
+            // Pick random empty position and try it — O(1) amortized
+            let mut placed = false;
+            let mut attempts = 0u8;
+            while attempts < 4 && !placed {
+                let target = rng.gen_range(0..empty_count);
+                if let Some(pos) = nth_set_bit(&empty, target) {
+                    if is_legal(board, pos) {
+                        place_stone(board, pos);
+                        placed = true;
+                        consecutive_passes = 0;
+                    }
+                }
+                attempts += 1;
+            }
+            if !placed {
+                pass_turn(board);
+                consecutive_passes += 1;
             }
         }
         moves_made += 1;
