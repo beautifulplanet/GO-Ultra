@@ -7,4 +7,21 @@ export default defineConfig({
   optimizeDeps: {
     exclude: ['go-engine'],
   },
+  server: {
+    headers: {
+      'Cross-Origin-Opener-Policy': 'same-origin',
+      'Cross-Origin-Embedder-Policy': 'require-corp',
+    },
+  },
+  worker: { format: 'es' },
+  build: {
+    rollupOptions: {
+      output: {
+        manualChunks: {
+          three: ['three'],
+          gsap: ['gsap'],
+        },
+      },
+    },
+  },
 })
