@@ -143,4 +143,65 @@ impl GoGame {
     pub fn move_count(&self) -> u32 {
         self.board.move_count
     }
+
+    /// Serialize full board state for Web Worker transfer.
+    /// Format: [size, players, turn, ko_hi, ko_lo, allow_suicide, move_count(4 bytes),
+    ///          captures(3×4=12 bytes), consecutive_passes(3 bytes),
+    ///          stones(3 players × 3 u128 × 16 bytes = 144 bytes)]
+    /// Total: fixed-size, deterministic.
+    pub fn serialize(&self) -> Vec<u8> {
+        let b = &self.board;
+        let mut data = Vec::with_capacity(256);
+        data.push(b.size);
+        data.push(b.active_players);
+        data.push(b.turn);
+        // Ko: 0xFF 0xFF = none, otherwise big-endian u16
+        match b.ko {
+            Some(k) => { data.push((k >> 8) as u8); data.push(k as u8); }
+            None => { data.push(0xFF); data.push(0xFF); }
+        }
+        data.push(b.allow_suicide as u8);
+        // move_count as 4 bytes LE
+        data.extend_from_slice(&b.move_count.to_le_bytes());
+        // captures: 3 × u32 LE
+        for c in &b.captures { data.extend_from_slice(&c.to_le_bytes()); }
+        // consecutive_passes: 3 bytes
+        for p in &b.consecutive_passes { data.push(*p as u8); }
+        // stones: 3 players × 3 chunks × 16 bytes
+        for player in 0..3 {
+            for chunk in 0..3 {
+                data.extend_from_slice(&b.stones[player][chunk].to_le_bytes());
+            }
+        }
+        data
+    }
+
+    /// Deserialize and create a GoGame from serialized state.
+    pub fn deserialize(data: &[u8]) -> GoGame {
+        let size = data[0];
+        let players = data[1];
+        let mut board = Board::new(size, players);
+        board.turn = data[2];
+        let ko_hi = data[3] as u16;
+        let ko_lo = data[4] as u16;
+        board.ko = if ko_hi == 0xFF && ko_lo == 0xFF { None } else { Some((ko_hi << 8) | ko_lo) };
+        board.allow_suicide = data[5] != 0;
+        board.move_count = u32::from_le_bytes([data[6], data[7], data[8], data[9]]);
+        for i in 0..3 {
+            let off = 10 + i * 4;
+            board.captures[i] = u32::from_le_bytes([data[off], data[off+1], data[off+2], data[off+3]]);
+        }
+        for i in 0..3 {
+            board.consecutive_passes[i] = data[22 + i] != 0;
+        }
+        for player in 0..3 {
+            for chunk in 0..3 {
+                let off = 25 + player * 48 + chunk * 16;
+                board.stones[player][chunk] = u128::from_le_bytes(
+                    data[off..off+16].try_into().unwrap()
+                );
+            }
+        }
+        GoGame { board }
+    }
 }

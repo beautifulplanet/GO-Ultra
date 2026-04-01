@@ -22,6 +22,13 @@ function App() {
     setMode('playing')
   }
 
+  // Scale iterations by board size — bigger boards need fewer to stay responsive
+  const getIterations = useCallback(() => {
+    if (boardSize <= 9) return 500
+    if (boardSize <= 13) return 300
+    return 200
+  }, [boardSize])
+
   const handlePlay = useCallback((pos: number) => {
     if (thinking || !state || state.isGameOver) return
     if (state.turn !== 0 && opponent === 'ai') return // not player's turn
@@ -29,13 +36,10 @@ function App() {
     const ok = play(pos)
     if (ok && opponent === 'ai') {
       setThinking(true)
-      // Let the render update, then run AI
-      setTimeout(() => {
-        aiMove(800)
-        setThinking(false)
-      }, 50)
+      // AI runs in Web Worker — non-blocking
+      aiMove(getIterations(), () => setThinking(false))
     }
-  }, [thinking, state, opponent, play, aiMove])
+  }, [thinking, state, opponent, play, aiMove, getIterations])
 
   const handlePass = () => {
     if (thinking || !state || state.isGameOver) return
@@ -43,10 +47,7 @@ function App() {
     pass()
     if (opponent === 'ai' && !state.isGameOver) {
       setThinking(true)
-      setTimeout(() => {
-        aiMove(800)
-        setThinking(false)
-      }, 50)
+      aiMove(getIterations(), () => setThinking(false))
     }
   }
 
