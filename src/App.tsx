@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect, useRef } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { useGoEngine } from './useGoEngine'
 import { SceneManager } from './three/SceneManager'
 import { Lobby } from './components/Lobby'
@@ -11,7 +11,7 @@ import './styles/global.css'
 import './styles/animations.css'
 import './styles/themes.css'
 
-type Phase = 'lobby' | 'loading' | 'playing' | 'game_over'
+type Phase = 'lobby' | 'playing' | 'game_over'
 
 const PLAYER_COLORS_HEX = ['#1a1a1a', '#f0ead6', '#8B1A1A']
 const PLAYER_NAMES_SHORT = ['Obsidian', 'Ivory', 'Crimson']
@@ -34,17 +34,27 @@ function App() {
   const sceneRef = useRef<SceneManager | null>(null)
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null)
 
-  const { ready, state, play, pass, aiMove, newGame } = useGoEngine(boardSize, players)
+  const { ready, state, play, pass, aiMoveSync, newGame } = useGoEngine(boardSize, players)
+
+  // Refs to avoid stale closures in event listeners
+  const stateRef = useRef(state)
+  const thinkingRef = useRef(thinking)
+  const opponentRef = useRef(opponent)
+  const playersRef = useRef(players)
+  stateRef.current = state
+  thinkingRef.current = thinking
+  opponentRef.current = opponent
+  playersRef.current = players
 
   // Scale iterations by board size
-  const getIterations = useCallback(() => {
+  const getIterations = () => {
     if (boardSize <= 9) return 500
     if (boardSize <= 13) return 300
     return 200
-  }, [boardSize])
+  }
 
   // Start game from lobby
-  const handleStart = useCallback((config: { boardSize: number; players: number; opponent: string; timeControl: number }) => {
+  const handleStart = (config: { boardSize: number; players: number; opponent: string; timeControl: number }) => {
     setBoardSize(config.boardSize)
     setPlayers(config.players)
     setOpponent(config.opponent as 'ai' | 'local')
@@ -52,12 +62,8 @@ function App() {
     setTimeLeft(config.timeControl)
     setWinner(null)
     newGame(config.boardSize, config.players)
-    setPhase('loading')
-  }, [newGame])
 
-  // Initialize Three.js scene when entering loading/playing phase
-  useEffect(() => {
-    if (phase !== 'loading') return
+    // Build Three.js scene immediately
     const container = sceneContainerRef.current
     if (!container) return
 
@@ -67,28 +73,67 @@ function App() {
       sceneRef.current = null
     }
 
-    const scene = new SceneManager(container, boardSize, 'high')
+    const scene = new SceneManager(container, config.boardSize, 'high')
     sceneRef.current = scene
     scene.start()
-
-    // Wire up click handling on the canvas
-    const canvas = scene.getCanvas()
-    canvas.addEventListener('pointerdown', handleCanvasClick)
-    canvas.addEventListener('pointermove', handleCanvasMove)
-
     setPhase('playing')
+  }
 
-    return () => {
-      canvas.removeEventListener('pointerdown', handleCanvasClick)
-      canvas.removeEventListener('pointermove', handleCanvasMove)
+  // Wire up pointer events on the canvas — uses refs to avoid stale closures
+  useEffect(() => {
+    if (phase !== 'playing') return
+    const scene = sceneRef.current
+    if (!scene) return
+    const canvas = scene.getCanvas()
+
+    const onPointerDown = (e: PointerEvent) => {
+      const s = stateRef.current
+      if (!s || thinkingRef.current || s.isGameOver) return
+      if (s.turn !== 0 && opponentRef.current === 'ai') return
+
+      const idx = scene.raycaster.getIntersection(e, canvas)
+      if (idx >= 0 && s.legalMoves.has(idx)) {
+        const ok = play(idx)
+        if (ok) {
+          scene.particles.dustRing(idx, s.size)
+        }
+      }
     }
-  }, [phase === 'loading', boardSize])
+
+    const onPointerMove = (e: PointerEvent) => {
+      const s = stateRef.current
+      if (!s) return
+      canvas.style.cursor = scene.raycaster.getCursor(e, canvas, s.legalMoves)
+    }
+
+    canvas.addEventListener('pointerdown', onPointerDown)
+    canvas.addEventListener('pointermove', onPointerMove)
+    return () => {
+      canvas.removeEventListener('pointerdown', onPointerDown)
+      canvas.removeEventListener('pointermove', onPointerMove)
+    }
+  }, [phase, play])
 
   // Sync stones to 3D scene when state changes
   useEffect(() => {
     if (!state || !sceneRef.current) return
     sceneRef.current.stones.syncBoard(state.board, state.size)
   }, [state?.board, state?.moveCount])
+
+  // AI auto-move: after human plays, if it's AI's turn, trigger AI
+  useEffect(() => {
+    if (phase !== 'playing' || !state || state.isGameOver || thinking) return
+    if (opponent !== 'ai') return
+    // AI plays for all non-zero players
+    if (state.turn === 0) return
+
+    setThinking(true)
+    const timeout = setTimeout(() => {
+      aiMoveSync(getIterations())
+      setThinking(false)
+    }, 80) // small delay so the UI shows the human's stone first
+    return () => clearTimeout(timeout)
+  }, [state?.moveCount, state?.turn, phase, opponent])
 
   // Game over detection
   useEffect(() => {
@@ -105,7 +150,7 @@ function App() {
       sceneRef.current.particles.confetti()
       sceneRef.current.stones.pulseWinner(state.board, w)
     }
-  }, [state?.isGameOver])
+  }, [state?.isGameOver, players])
 
   // Timer
   useEffect(() => {
@@ -114,7 +159,6 @@ function App() {
     timerRef.current = setInterval(() => {
       setTimeLeft(prev => {
         if (prev <= 1) {
-          // Auto-pass
           pass()
           return timeControl
         }
@@ -124,53 +168,31 @@ function App() {
     return () => {
       if (timerRef.current) clearInterval(timerRef.current)
     }
-  }, [phase, state?.turn, thinking, timeControl])
+  }, [phase, state?.turn, thinking, timeControl, pass])
 
-  // Canvas click → play stone
-  const handleCanvasClick = useCallback((e: PointerEvent) => {
-    const scene = sceneRef.current
-    if (!scene || !state || thinking || state.isGameOver) return
-    if (state.turn !== 0 && opponent === 'ai') return
-
-    const canvas = scene.getCanvas()
-    const idx = scene.raycaster.getIntersection(e as PointerEvent, canvas)
-    if (idx >= 0 && state.legalMoves.has(idx)) {
-      const ok = play(idx)
-      if (ok) {
-        scene.particles.dustRing(idx, state.size)
-        if (opponent === 'ai') {
-          setThinking(true)
-          aiMove(getIterations(), () => setThinking(false))
-        }
-      }
-    }
-  }, [state, thinking, opponent, play, aiMove, getIterations])
-
-  // Canvas hover cursor
-  const handleCanvasMove = useCallback((e: PointerEvent) => {
-    const scene = sceneRef.current
-    if (!scene || !state) return
-    const canvas = scene.getCanvas()
-    canvas.style.cursor = scene.raycaster.getCursor(e as PointerEvent, canvas, state.legalMoves)
-  }, [state])
-
-  const handlePass = useCallback(() => {
+  const handlePass = () => {
     if (thinking || !state || state.isGameOver) return
     if (state.turn !== 0 && opponent === 'ai') return
     pass()
-    if (opponent === 'ai' && !state?.isGameOver) {
-      setThinking(true)
-      aiMove(getIterations(), () => setThinking(false))
-    }
-  }, [thinking, state, opponent, pass, aiMove, getIterations])
+    // AI response is handled by the auto-move useEffect
+  }
 
-  const handleNewGame = useCallback(() => {
+  const handleNewGame = () => {
     setWinner(null)
+    setThinking(false)
     newGame(boardSize, players)
-    setPhase('loading')
-  }, [boardSize, players, newGame])
+    // Rebuild scene
+    const container = sceneContainerRef.current
+    if (container && sceneRef.current) {
+      sceneRef.current.dispose()
+      const scene = new SceneManager(container, boardSize, 'high')
+      sceneRef.current = scene
+      scene.start()
+    }
+    setPhase('playing')
+  }
 
-  const handleBackToLobby = useCallback(() => {
+  const handleBackToLobby = () => {
     if (sceneRef.current) {
       sceneRef.current.dispose()
       sceneRef.current = null
@@ -179,11 +201,16 @@ function App() {
     setShowSettings(false)
     setThinking(false)
     setWinner(null)
-  }, [])
+  }
 
   // LOBBY
   if (phase === 'lobby') {
-    return <Lobby onStart={handleStart} ready={ready} />
+    return (
+      <>
+        <div ref={sceneContainerRef} className="scene-canvas" />
+        <Lobby onStart={handleStart} ready={ready} />
+      </>
+    )
   }
 
   if (!state) return null
@@ -191,6 +218,8 @@ function App() {
   const playerTypes = Array.from({ length: players }, (_, i) =>
     i === 0 ? 'Human' : (opponent === 'ai' ? 'AI' : 'Human')
   )
+
+  const capturesArr = Array.from({ length: players }, (_, i) => state.captures[i] || 0)
 
   return (
     <>
@@ -207,7 +236,7 @@ function App() {
         <PlayerPanel
           turn={state.turn}
           players={players}
-          captures={Array.from({ length: players }, (_, i) => state.captures[i] || 0)}
+          captures={capturesArr}
           types={playerTypes}
         />
 
@@ -228,13 +257,13 @@ function App() {
         )}
 
         {thinking && (
-          <div className="thinking">AI thinking</div>
+          <div className="thinking">AI thinking…</div>
         )}
 
         {phase === 'game_over' && winner !== null && (
           <GameOverlay
             text={`${PLAYER_NAMES_SHORT[winner]} wins!`}
-            subtitle={`${state.scores[0].toFixed(1)} — ${state.scores[1].toFixed(1)}${players > 2 ? ` — ${state.scores[2].toFixed(1)}` : ''}`}
+            subtitle={Array.from({ length: players }, (_, i) => state.scores[i].toFixed(1)).join(' — ')}
           />
         )}
       </div>
