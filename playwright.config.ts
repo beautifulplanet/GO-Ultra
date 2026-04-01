@@ -5,15 +5,15 @@ export default defineConfig({
   timeout: 30000,
   retries: 0,
   use: {
-    baseURL: 'http://localhost:5177',
+    baseURL: 'http://localhost:5173',
     headless: true,
     viewport: { width: 1280, height: 720 },
   },
   webServer: {
-    command: 'npx vite --port 5177 --force',
-    port: 5177,
+    command: 'npx vite --port 5173 --force',
+    port: 5173,
     reuseExistingServer: true,
-    timeout: 15000,
+    timeout: 30000,
   },
   projects: [
     { name: 'chromium', use: { browserName: 'chromium' } },

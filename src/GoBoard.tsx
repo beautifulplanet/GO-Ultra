@@ -184,6 +184,7 @@ export default function GoBoard({ state, onPlay, disabled }: Props) {
     const row = Math.round((my - padding) / cellSize)
     if (col < 0 || col >= size || row < 0 || row >= size) return
     const pos = row * size + col
+    console.log(`[CLICK] pixel=(${mx.toFixed(0)},${my.toFixed(0)}) → row=${row} col=${col} pos=${pos} legal=${legalMoves.has(pos)} boardVal=${board[pos]}`)
     if (legalMoves.has(pos)) {
       onPlay(pos)
     }

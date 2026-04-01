@@ -4,6 +4,9 @@ import wasm from 'vite-plugin-wasm'
 
 export default defineConfig({
   plugins: [react(), wasm()],
+  resolve: {
+    dedupe: ['react', 'react-dom'],
+  },
   optimizeDeps: {
     exclude: ['go-engine'],
   },

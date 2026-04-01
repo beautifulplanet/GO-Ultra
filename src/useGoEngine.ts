@@ -37,8 +37,11 @@ export function useGoEngine(boardSize: number, players: number) {
     for (let i = 0; i < legalArr.length; i++) legalSet.add(legalArr[i])
     const capturesArr: number[] = []
     for (let i = 0; i < numPlayers; i++) capturesArr.push(game.captures(i))
+    const boardArr = game.board_state()
+    const stoneCount = Array.from(boardArr).filter(v => v !== 255).length
+    console.log('[SYNC]', { turn: game.turn(), moveCount: game.move_count(), captures: [...capturesArr], stonesOnBoard: stoneCount, legalMoveCount: legalSet.size })
     setState({
-      board: game.board_state(),
+      board: boardArr,
       turn: game.turn(),
       scores: game.scores(),
       captures: capturesArr,
@@ -53,8 +56,19 @@ export function useGoEngine(boardSize: number, players: number) {
   const play = useCallback((pos: number) => {
     const game = gameRef.current
     if (!game) return false
+    const beforeBoard = game.board_state()
+    const beforeStones = Array.from(beforeBoard).filter(v => v !== 255).length
     const ok = game.play(pos)
-    if (ok) syncState(game, game.players())
+    if (ok) {
+      const afterBoard = game.board_state()
+      const afterStones = Array.from(afterBoard).filter(v => v !== 255).length
+      const removed = beforeStones + 1 - afterStones  // +1 for newly placed stone
+      console.log(`[PLAY] pos=${pos} row=${Math.floor(pos/game.size())} col=${pos%game.size()} → ok=${ok}, stonesBefore=${beforeStones}, stonesAfter=${afterStones}, captured=${removed}`)
+      if (removed > 0) console.log('[CAPTURE!]', removed, 'stone(s) captured')
+      syncState(game, game.players())
+    } else {
+      console.log(`[PLAY] pos=${pos} → ILLEGAL`)
+    }
     return ok
   }, [syncState])
 
