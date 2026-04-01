@@ -81,6 +81,68 @@ pub fn neighbors(position: u16, size: u8) -> Vec<u16> {
     result
 }
 
+/// Stack-allocated neighbor array — zero allocation.
+/// Returns (array, count) where count is 2-4.
+#[inline]
+pub fn neighbors_array(position: u16, size: u8) -> ([u16; 4], u8) {
+    let (r, c) = row_col(position, size);
+    let mut arr = [0u16; 4];
+    let mut count = 0u8;
+    if r > 0 { arr[count as usize] = pos(r - 1, c, size); count += 1; }
+    if r < size - 1 { arr[count as usize] = pos(r + 1, c, size); count += 1; }
+    if c > 0 { arr[count as usize] = pos(r, c - 1, size); count += 1; }
+    if c < size - 1 { arr[count as usize] = pos(r, c + 1, size); count += 1; }
+    (arr, count)
+}
+
+/// Iterate over set bits in a [u128; 3] bitboard. Returns positions.
+#[inline]
+pub fn bits_iter(bits: &[u128; 3]) -> BitsIter {
+    BitsIter { chunks: *bits, chunk_idx: 0 }
+}
+
+pub struct BitsIter {
+    chunks: [u128; 3],
+    chunk_idx: usize,
+}
+
+impl Iterator for BitsIter {
+    type Item = u16;
+
+    #[inline]
+    fn next(&mut self) -> Option<u16> {
+        while self.chunk_idx < 3 {
+            if self.chunks[self.chunk_idx] != 0 {
+                let bit = self.chunks[self.chunk_idx].trailing_zeros() as u16;
+                self.chunks[self.chunk_idx] &= self.chunks[self.chunk_idx] - 1; // clear lowest set bit
+                return Some(self.chunk_idx as u16 * 128 + bit);
+            }
+            self.chunk_idx += 1;
+        }
+        None
+    }
+}
+
+/// Get the nth set bit position from a [u128; 3] bitboard.
+/// Used for uniform random selection from empty positions without building a Vec.
+#[inline]
+pub fn nth_set_bit(bits: &[u128; 3], mut n: u32) -> Option<u16> {
+    for chunk_idx in 0..3usize {
+        let mut chunk = bits[chunk_idx];
+        let count = chunk.count_ones();
+        if n < count {
+            // The nth set bit is in this chunk
+            for _ in 0..n {
+                chunk &= chunk - 1; // clear lowest set bit
+            }
+            let bit = chunk.trailing_zeros() as u16;
+            return Some(chunk_idx as u16 * 128 + bit);
+        }
+        n -= count;
+    }
+    None
+}
+
 /// Precompute neighbor masks for every position on the board.
 /// neighbor_masks[i] has bits set for all orthogonal neighbors of position i.
 pub fn precompute_neighbor_masks(size: u8) -> Vec<[u128; 3]> {
